@@ -6,7 +6,12 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"os/exec"
+	"regexp"
 	"runtime"
+	"time"
+
+	"github.com/mitchellh/go-ps"
 )
 
 // Config struct for reading in json config file
@@ -25,7 +30,7 @@ func applyConfig() (Config, error) {
 		fmt.Println(err)
 	}
 
-	fmt.Println("Opened config file")
+	fmt.Println("opened config file")
 	// defer file closure
 	defer jsonFile.Close()
 	// read in json as a byte array
@@ -52,14 +57,73 @@ func applyConfig() (Config, error) {
 }
 
 func beforeObsidian(vaultDir string) error {
-	fmt.Println("Starting obsidian")
 
 	// Check if vault contains .git
 	if _, err := os.Stat(vaultDir + "/.git"); errors.Is(err, os.ErrNotExist) {
 		return err
 	}
 
+	os.Chdir(vaultDir)
+
+	fmt.Println("pulling most recent changes from remote...")
+
+	cmd := exec.Command("git", "pull")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
+
+	if err != nil {
+		fmt.Println("error pulling from repository: ", err)
+	}
+
 	return nil
+}
+
+func commitChanges(commitFormat string) {
+	fmt.Println("obsidian closed")
+	fmt.Println("evaluating changes and pushing to repository")
+	commit_time := time.Now().Format(commitFormat)
+
+	cmd := exec.Command("git", "add", ".")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err := cmd.Run()
+
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	cmd = exec.Command("git", "status")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err = cmd.Run()
+
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	cmd = exec.Command("git", "commit", "-m", fmt.Sprintf("Updated on %s", commit_time))
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err = cmd.Run()
+
+	if err != nil {
+		fmt.Println(err)
+	}
+
+	cmd = exec.Command("git", "push")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	err = cmd.Run()
+
+	if err != nil {
+		fmt.Println(err)
+	}
 }
 
 func main() {
@@ -73,8 +137,6 @@ func main() {
 		os.Exit(1)
 	}
 
-	fmt.Println("Config ok!")
-
 	err = beforeObsidian(config.VaultDir)
 
 	if err != nil {
@@ -82,5 +144,53 @@ func main() {
 		os.Exit(2)
 	}
 
-	fmt.Println("beforeObsidian ok!")
+	cmd := exec.Command(config.ObsidianPath)
+	err = cmd.Start()
+
+	if err != nil {
+		fmt.Println("error starting Obsidian: ", err)
+		os.Exit(3)
+	}
+
+	processID := cmd.Process.Pid
+	state := "not found"
+	time_started := time.Now()
+
+	// Wait for process to close
+
+	for {
+
+		time.Sleep(1 * time.Second)
+
+		process, err := ps.FindProcess(processID)
+
+		process_details := fmt.Sprintf("%+v\n", process)
+
+		re := regexp.MustCompile(`state:(\d+)`)
+
+		match := re.FindStringSubmatch(process_details)
+
+		if len(match) > 1 {
+			state = match[1]
+		}
+
+		fmt.Println(time_started)
+
+		duration := time.Since(time_started)
+
+		time_since_last_sync := (int(duration.Seconds()) % 60)
+
+		if time_since_last_sync >= config.SyncFreqMins {
+			commitChanges(config.DateFormat)
+			time_started = time.Now()
+		}
+
+		if err != nil || process == nil || state == "90" {
+			break
+		}
+
+	}
+
+	commitChanges(config.DateFormat)
+
 }
