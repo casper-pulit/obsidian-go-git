@@ -8,7 +8,6 @@ import (
 	"os"
 	"os/exec"
 	"regexp"
-	"runtime"
 	"time"
 
 	"github.com/mitchellh/go-ps"
@@ -19,7 +18,7 @@ type Config struct {
 	ObsidianPath string `json:"obsidian-path"`
 	VaultDir     string `json:"vault-dir"`
 	DateFormat   string `json:"commit-date-format"`
-	SyncFreqMins int    `json:"sync-freq-min"`
+	SyncFreqSec  int    `json:"sync-freq-sec"`
 }
 
 func applyConfig() (Config, error) {
@@ -40,6 +39,7 @@ func applyConfig() (Config, error) {
 	// unmarshal byte array into our config struct
 	json.Unmarshal(byteValue, &config)
 
+	// review error messages
 	if config.ObsidianPath == "" {
 		return config, errors.New("no obsidian path specified. run ogg --config and provide the correct path")
 	}
@@ -56,6 +56,7 @@ func applyConfig() (Config, error) {
 
 }
 
+// pulls remote changes before starting obsidian
 func beforeObsidian(vaultDir string) error {
 
 	// Check if vault contains .git
@@ -63,10 +64,12 @@ func beforeObsidian(vaultDir string) error {
 		return err
 	}
 
+	// Change directory to the vault directory defined in config file
 	os.Chdir(vaultDir)
 
 	fmt.Println("pulling most recent changes from remote...")
 
+	// git pull
 	cmd := exec.Command("git", "pull")
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -80,8 +83,9 @@ func beforeObsidian(vaultDir string) error {
 	return nil
 }
 
+// adds, commits and pushes the github repo
+// called if sync is required or after obisidian closed
 func commitChanges(commitFormat string) {
-	fmt.Println("obsidian closed")
 	fmt.Println("evaluating changes and pushing to repository")
 	commit_time := time.Now().Format(commitFormat)
 
@@ -126,10 +130,10 @@ func commitChanges(commitFormat string) {
 	}
 }
 
+// main func to be cleaned up
 func main() {
 
-	curr_os := runtime.GOOS
-	fmt.Println(curr_os)
+	// read in config and check if as expected
 	config, err := applyConfig()
 
 	if err != nil {
@@ -137,6 +141,7 @@ func main() {
 		os.Exit(1)
 	}
 
+	// change dir to vault dir, check if a git repo and git pull
 	err = beforeObsidian(config.VaultDir)
 
 	if err != nil {
@@ -144,20 +149,24 @@ func main() {
 		os.Exit(2)
 	}
 
+	// run obsidian
 	cmd := exec.Command(config.ObsidianPath)
 	err = cmd.Start()
 
 	if err != nil {
-		fmt.Println("error starting Obsidian: ", err)
+		fmt.Println("error starting obsidian: ", err)
 		os.Exit(3)
 	}
 
+	// get process id
 	processID := cmd.Process.Pid
+	// init state (linux only)
 	state := "not found"
+	// init time_started to check syncing
 	time_started := time.Now()
 
 	// Wait for process to close
-
+	// Sync periodically
 	for {
 
 		time.Sleep(1 * time.Second)
@@ -174,23 +183,28 @@ func main() {
 			state = match[1]
 		}
 
-		fmt.Println(time_started)
+		// Only sync if sync time greater than 0
+		if config.SyncFreqSec > 0 {
+			// get duration since last sync
+			duration := time.Since(time_started)
 
-		duration := time.Since(time_started)
+			time_since_last_sync := (int(duration.Seconds()) % 60)
 
-		time_since_last_sync := (int(duration.Seconds()) % 60)
-
-		if time_since_last_sync >= config.SyncFreqMins {
-			commitChanges(config.DateFormat)
-			time_started = time.Now()
+			// if time sync last sync greater than or equal to frequency commitChanges and restart timer
+			if time_since_last_sync >= config.SyncFreqSec {
+				commitChanges(config.DateFormat)
+				time_started = time.Now()
+			}
 		}
 
+		// if process closed break out of loop
 		if err != nil || process == nil || state == "90" {
 			break
 		}
 
 	}
 
+	// commit changes after obsidian is closed
 	commitChanges(config.DateFormat)
 
 }

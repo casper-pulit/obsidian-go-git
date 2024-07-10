@@ -2,5 +2,5 @@
     "obsidian-path":"obsidian",
     "vault-dir":"/home/casper/Documents/code/test-vault",
     "commit-date-format":"Monday 2006-01-02 15:04:05",
-    "sync-freq-min":5
+    "sync-freq-sec": 60
 }
