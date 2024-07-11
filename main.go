@@ -5,8 +5,10 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"time"
 
@@ -22,8 +24,17 @@ type Config struct {
 }
 
 func applyConfig() (Config, error) {
+
+	exePath, err := os.Executable()
+
+	if err != nil {
+		log.Fatalf("failed to get path of the executable (ogg) %v", err)
+	}
+
+	exeDir := filepath.Dir(exePath)
+
 	// Open json file
-	jsonFile, err := os.Open("config.json")
+	jsonFile, err := os.Open(filepath.Join(exeDir, "config.json"))
 
 	if err != nil {
 		fmt.Println(err)
