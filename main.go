@@ -199,7 +199,7 @@ func main() {
 			// get duration since last sync
 			duration := time.Since(time_started)
 
-			time_since_last_sync := (int(duration.Seconds()) % 60)
+			time_since_last_sync := int(duration.Seconds())
 
 			// if time sync last sync greater than or equal to frequency commitChanges and restart timer
 			if time_since_last_sync >= config.SyncFreqSec {
